@@ -17,9 +17,9 @@ var (
 var removeCmd = &cobra.Command{
 	Use:   "remove",
 	Short: "删除订阅",
-	Long:  `根据名称或序号删除一个订阅。`,
+	Long:  `根据名称、别名或序号删除一个订阅。`,
 	Example: `  news4coder remove --name "InfoQ中文站"
-  news4coder remove -n "Hacker News"
+  news4coder remove -n infoq
   news4coder remove --index 1
   news4coder remove -i 2`,
 	RunE: func(cmd *cobra.Command, args []string) error {

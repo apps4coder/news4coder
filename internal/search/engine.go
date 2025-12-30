@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -19,7 +20,7 @@ type Engine struct {
 func NewEngine() *Engine {
 	return &Engine{
 		client: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout: 30 * time.Second,
 		},
 	}
 }
@@ -30,17 +31,32 @@ func extractDomain(urlStr string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	// 返回主机名（例如：www.infoq.cn 或 infoq.cn）
 	host := parsedURL.Host
 	if host == "" {
 		return "", fmt.Errorf("无法从URL提取域名")
 	}
-	
+
 	return host, nil
 }
 
-// Search 使用Bing搜索指定网站的最新内容
+// extractRealURL 从DuckDuckGo重定向链接中提取真实URL
+func extractRealURL(ddgURL string) string {
+	// DuckDuckGo链接格式: https://duckduckgo.com/l/?uddg=<encoded_url>&rut=...
+	if strings.Contains(ddgURL, "duckduckgo.com/l/") {
+		parsed, err := url.Parse(ddgURL)
+		if err == nil {
+			uddg := parsed.Query().Get("uddg")
+			if uddg != "" {
+				return uddg
+			}
+		}
+	}
+	return ddgURL
+}
+
+// Search 使用DuckDuckGo搜索指定网站的最新内容
 func (e *Engine) Search(siteURL string) ([]SearchResult, error) {
 	// 提取域名
 	domain, err := extractDomain(siteURL)
@@ -48,9 +64,9 @@ func (e *Engine) Search(siteURL string) ([]SearchResult, error) {
 		return nil, fmt.Errorf("URL解析失败: %w", err)
 	}
 
-	// 构造Bing搜索URL
-	query := fmt.Sprintf("%s", domain)
-	searchURL := fmt.Sprintf("https://www.bing.com/search?q=%s", url.QueryEscape(query))
+	// 构造DuckDuckGo搜索URL - 使用 site: 语法进行站内搜索
+	query := fmt.Sprintf("site:%s", domain)
+	searchURL := fmt.Sprintf("https://html.duckduckgo.com/html/?q=%s", url.QueryEscape(query))
 
 	// 发送HTTP请求
 	req, err := http.NewRequest("GET", searchURL, nil)
@@ -58,9 +74,11 @@ func (e *Engine) Search(siteURL string) ([]SearchResult, error) {
 		return nil, fmt.Errorf("创建请求失败: %w", err)
 	}
 
-	// 设置User-Agent避免被识别为爬虫
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36")
+	// 设置请求头模拟真实浏览器
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	req.Header.Set("Accept-Encoding", "identity")
 
 	resp, err := e.client.Do(req)
 	if err != nil {
@@ -82,67 +100,49 @@ func (e *Engine) Search(siteURL string) ([]SearchResult, error) {
 	results := []SearchResult{}
 	index := 1
 
-	// 尝试多种选择器以适配Bing的不同页面结构
-	selectors := []string{
-		"li.b_algo",
-		".b_algo",
-		"#b_results li",
-		"ol#b_results li",
-	}
-	
-	for _, selector := range selectors {
-		doc.Find(selector).Each(func(i int, s *goquery.Selection) {
-			if index > 10 {
-				return
-			}
+	// DuckDuckGo HTML版本的搜索结果选择器
+	doc.Find(".result").Each(func(i int, s *goquery.Selection) {
+		if index > 10 {
+			return
+		}
 
-			result := SearchResult{Index: index}
+		result := SearchResult{Index: index}
 
-			// 提取标题和链接 - 尝试多种选择器
-			titleElem := s.Find("h2 a")
-			if titleElem.Length() == 0 {
-				titleElem = s.Find("h2").Find("a")
-			}
-			if titleElem.Length() == 0 {
-				titleElem = s.Find("a[href]")
-			}
-			
+		// 提取标题和链接
+		titleElem := s.Find(".result__a")
+		if titleElem.Length() > 0 {
 			result.Title = strings.TrimSpace(titleElem.Text())
 			if href, exists := titleElem.Attr("href"); exists {
-				// 过滤掉非目标网站的链接
-				if strings.Contains(href, domain) || strings.HasPrefix(href, "http") {
-					result.URL = href
+				// DuckDuckGo 会返回绝对URL
+				if strings.HasPrefix(href, "http") {
+					result.URL = extractRealURL(href)
+				} else if strings.HasPrefix(href, "//") {
+					result.URL = extractRealURL("https:" + href)
 				}
 			}
-
-			// 提取摘要 - 尝试多种选择器
-			snippetElem := s.Find(".b_caption p")
-			if snippetElem.Length() == 0 {
-				snippetElem = s.Find("p")
-			}
-			if snippetElem.Length() == 0 {
-				snippetElem = s.Find(".b_caption")
-			}
-			if snippetElem.Length() == 0 {
-				snippetElem = s.Find("div.b_caption")
-			}
-			result.Snippet = strings.TrimSpace(snippetElem.First().Text())
-
-			// 只添加有效的结果（至少有标题和URL）
-			if result.Title != "" && result.URL != "" {
-				results = append(results, result)
-				index++
-			}
-		})
-		
-		// 如果已经找到结果，就不再尝试其他选择器
-		if len(results) > 0 {
-			break
 		}
-	}
+
+		// 提取摘要
+		snippetElem := s.Find(".result__snippet")
+		if snippetElem.Length() > 0 {
+			result.Snippet = strings.TrimSpace(snippetElem.Text())
+		}
+
+		// 只添加有效的结果（至少有标题和URL）
+		if result.Title != "" && result.URL != "" {
+			results = append(results, result)
+			index++
+		}
+	})
 
 	if len(results) == 0 {
-		return nil, fmt.Errorf("未找到搜索结果，Bing可能需要验证或页面结构已变化。请尝试直接访问 https://www.bing.com/search?q=%s 查看搜索结果", url.QueryEscape(query))
+		// 调试：保存HTML到文件以便分析
+		if os.Getenv("DEBUG_SEARCH") == "1" {
+			htmlContent, _ := doc.Html()
+			os.WriteFile("debug_ddg.html", []byte(htmlContent), 0644)
+			fmt.Println("已保存HTML到 debug_ddg.html")
+		}
+		return nil, fmt.Errorf("未找到搜索结果。\n\n解决方法:\n1. 使用 --demo 参数查看演示效果\n2. 在浏览器中直接访问: https://duckduckgo.com/?q=%s", url.QueryEscape(query))
 	}
 
 	return results, nil

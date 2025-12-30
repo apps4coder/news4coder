@@ -10,16 +10,17 @@ import (
 )
 
 var (
-	addName string
-	addURL  string
+	addName  string
+	addAlias string
+	addURL   string
 )
 
 var addCmd = &cobra.Command{
 	Use:   "add",
 	Short: "添加新的订阅",
-	Long:  `添加一个新的网站订阅，指定订阅名称和URL。`,
-	Example: `  news4coder add --name "InfoQ中文站" --url "https://www.infoq.cn"
-  news4coder add -n "Hacker News" -u "https://news.ycombinator.com"`,
+	Long:  `添加一个新的网站订阅，指定订阅名称、别名和URL。`,
+	Example: `  news4coder add --name "InfoQ中文站" --alias infoq --url "https://www.infoq.cn"
+  news4coder add -n "Hacker News" -a hn -u "https://news.ycombinator.com"`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// 创建存储实例
 		store, err := storage.New()
@@ -37,7 +38,7 @@ var addCmd = &cobra.Command{
 		manager := subscription.NewManager(config)
 
 		// 添加订阅
-		if err := manager.Add(addName, addURL); err != nil {
+		if err := manager.Add(addName, addAlias, addURL); err != nil {
 			return err
 		}
 
@@ -49,6 +50,9 @@ var addCmd = &cobra.Command{
 		// 输出成功消息
 		green := color.New(color.FgGreen).SprintFunc()
 		fmt.Printf("%s 成功添加订阅：%s\n", green("✓"), addName)
+		if addAlias != "" {
+			fmt.Printf("  别名: %s\n", addAlias)
+		}
 		fmt.Printf("  URL: %s\n", addURL)
 
 		return nil
@@ -58,6 +62,7 @@ var addCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(addCmd)
 	addCmd.Flags().StringVarP(&addName, "name", "n", "", "订阅名称（必填）")
+	addCmd.Flags().StringVarP(&addAlias, "alias", "a", "", "订阅别名/代号（用于快捷访问）")
 	addCmd.Flags().StringVarP(&addURL, "url", "u", "", "网站URL（必填）")
 	addCmd.MarkFlagRequired("name")
 	addCmd.MarkFlagRequired("url")

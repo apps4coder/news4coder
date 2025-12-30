@@ -10,9 +10,9 @@ import (
 )
 
 var listCmd = &cobra.Command{
-	Use:   "list",
-	Short: "列出所有订阅",
-	Long:  `显示所有已添加的订阅列表。`,
+	Use:     "list",
+	Short:   "列出所有订阅",
+	Long:    `显示所有已添加的订阅列表。`,
 	Example: `  news4coder list`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// 创建存储实例
@@ -45,15 +45,20 @@ var listCmd = &cobra.Command{
 		fmt.Println()
 
 		// 表头
-		fmt.Printf("%-4s %-20s %-40s %-20s\n", "序号", "名称", "URL", "创建时间")
-		fmt.Println("─────────────────────────────────────────────────────────────────────────────────────")
+		fmt.Printf("%-4s %-12s %-18s %-35s %-16s\n", "序号", "别名", "名称", "URL", "创建时间")
+		fmt.Println("───────────────────────────────────────────────────────────────────────────────────────────────")
 
 		// 表内容
 		for i, sub := range subs {
-			fmt.Printf("%-4d %-20s %-40s %-20s\n",
+			alias := sub.Alias
+			if alias == "" {
+				alias = "-"
+			}
+			fmt.Printf("%-4d %-12s %-18s %-35s %-16s\n",
 				i+1,
-				truncateString(sub.Name, 20),
-				truncateString(sub.URL, 40),
+				truncateString(alias, 12),
+				truncateString(sub.Name, 18),
+				truncateString(sub.URL, 35),
 				sub.CreatedAt.Format("2006-01-02 15:04"))
 		}
 
